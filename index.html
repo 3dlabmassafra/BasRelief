@@ -909,33 +909,55 @@
 'use strict';
 
 /* ─── Constants ──────────────────────────────────────────────── */
-// Use the Vercel serverless proxy to bypass CORS.
-// When running locally (file://) fall back to direct API calls.
-const IS_LOCAL = location.protocol === 'file:' || location.hostname === 'localhost';
+// Proxy works ONLY on Vercel (serverless function).
+// GitHub Pages = static only → direct API (may hit CORS unless Triverse allows it).
+const IS_VERCEL       = location.hostname.endsWith('.vercel.app') || location.hostname === 'basrelief.vercel.app';
+const IS_GITHUB_PAGES = location.hostname.endsWith('.github.io');
+const IS_LOCAL        = location.protocol === 'file:' || location.hostname === 'localhost';
+const USE_PROXY       = IS_VERCEL; // only Vercel has the serverless function
 const PROXY_BASE = '/api/proxy';          // Vercel edge function
-const API_BASE   = 'https://api.triverse.ai/api/v1'; // direct (local only)
-const POLL_INTERVAL   = 3000;   // ms
-const MAX_POLL        = 120;    // max polls (~6 min)
+const API_BASE   = 'https://api.triverse.ai/api/v1';
+const POLL_INTERVAL   = 3000;
+const MAX_POLL        = 120;
 const LS_KEY          = 'triverse_api_key';
 
 /**
- * Builds a fetch URL + headers depending on environment.
- * On Vercel: routes through /api/proxy?path=<endpoint>
- * Locally:   calls api.triverse.ai directly.
+ * Routes the fetch through /api/proxy (Vercel) or directly to the API.
+ * On GitHub Pages, tries direct API — may fail if Triverse blocks CORS.
  */
 function apiFetch(path, apiKey, options = {}) {
-  if (IS_LOCAL) {
+  if (USE_PROXY) {
+    const url = `${PROXY_BASE}?path=${encodeURIComponent(path)}`;
+    const headers = { 'X-Api-Key': apiKey, ...(options.headers || {}) };
+    return fetch(url, { ...options, headers });
+  } else {
     const url = `${API_BASE}/${path}`;
     const headers = { 'Authorization': `Bearer ${apiKey}`, ...(options.headers || {}) };
     return fetch(url, { ...options, headers });
-  } else {
-    const url = `${PROXY_BASE}?path=${encodeURIComponent(path)}`;
-    const headers = { 'X-Api-Key': apiKey, ...(options.headers || {}) };
-    // Remove Authorization if set (proxy adds it server-side)
-    delete headers['Authorization'];
-    return fetch(url, { ...options, headers });
   }
 }
+
+/* Show banner if on GitHub Pages */
+window.addEventListener('DOMContentLoaded', () => {
+  if (IS_GITHUB_PAGES) {
+    const banner = document.createElement('div');
+    banner.style.cssText = `
+      position:fixed; top:0; left:0; right:0; z-index:9999;
+      background:#f59e0b; color:#000; text-align:center;
+      padding:10px 16px; font-weight:600; font-size:14px;
+    `;
+    banner.innerHTML = `
+      ⚠️ Stai usando <b>GitHub Pages</b> che non supporta il proxy API.
+      Per usare l'app correttamente esegui il deploy su
+      <a href="https://vercel.com/new/clone?repository-url=https://github.com/3dlabmassafra/BasRelief"
+         target="_blank" style="color:#1e40af;text-decoration:underline">
+        Vercel (click qui — gratis)
+      </a>
+      oppure accedi tramite la tua URL Vercel.
+    `;
+    document.body.prepend(banner);
+  }
+});
 
 /* ─── DOM refs ───────────────────────────────────────────────── */
 const $ = id => document.getElementById(id);
