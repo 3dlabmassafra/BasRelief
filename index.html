@@ -710,8 +710,8 @@
         </div>
 
         <div class="cors-notice">
-          <strong>⚠️ CORS Notice</strong>
-          If API calls fail due to CORS, you'll need to run this page through a local proxy, use a browser extension that disables CORS, or deploy a server-side proxy. The API key is sent directly from your browser to <code>api.triverse.ai</code>.
+          <strong>✅ Proxy attivo</strong>
+          Le chiamate API passano attraverso il proxy serverless Vercel (<code>/api/proxy</code>) — nessun problema CORS.
         </div>
       </div>
     </div>
@@ -909,10 +909,33 @@
 'use strict';
 
 /* ─── Constants ──────────────────────────────────────────────── */
-const API_BASE        = 'https://api.triverse.ai/api/v1';
+// Use the Vercel serverless proxy to bypass CORS.
+// When running locally (file://) fall back to direct API calls.
+const IS_LOCAL = location.protocol === 'file:' || location.hostname === 'localhost';
+const PROXY_BASE = '/api/proxy';          // Vercel edge function
+const API_BASE   = 'https://api.triverse.ai/api/v1'; // direct (local only)
 const POLL_INTERVAL   = 3000;   // ms
 const MAX_POLL        = 120;    // max polls (~6 min)
 const LS_KEY          = 'triverse_api_key';
+
+/**
+ * Builds a fetch URL + headers depending on environment.
+ * On Vercel: routes through /api/proxy?path=<endpoint>
+ * Locally:   calls api.triverse.ai directly.
+ */
+function apiFetch(path, apiKey, options = {}) {
+  if (IS_LOCAL) {
+    const url = `${API_BASE}/${path}`;
+    const headers = { 'Authorization': `Bearer ${apiKey}`, ...(options.headers || {}) };
+    return fetch(url, { ...options, headers });
+  } else {
+    const url = `${PROXY_BASE}?path=${encodeURIComponent(path)}`;
+    const headers = { 'X-Api-Key': apiKey, ...(options.headers || {}) };
+    // Remove Authorization if set (proxy adds it server-side)
+    delete headers['Authorization'];
+    return fetch(url, { ...options, headers });
+  }
+}
 
 /* ─── DOM refs ───────────────────────────────────────────────── */
 const $ = id => document.getElementById(id);
@@ -1097,22 +1120,20 @@ async function submitJob(apiKey) {
   formData.append('thickness',   thicknessRange.value);
   formData.append('format',      outputFormat.value);
 
-  // Try primary endpoint
+  // Try primary endpoint (routed through /api/proxy on Vercel to avoid CORS)
   let res, data;
 
   try {
-    res = await fetch(`${API_BASE}/relief/generate`, {
+    res = await apiFetch('relief/generate', apiKey, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}` },
       body: formData,
     });
     data = await res.json();
   } catch (e) {
-    // Network / CORS error — try fallback
+    // Try fallback endpoint
     console.warn('Primary endpoint failed, trying fallback:', e);
-    res = await fetch(`${API_BASE}/image-to-3d`, {
+    res = await apiFetch('image-to-3d', apiKey, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}` },
       body: formData,
     });
     data = await res.json();
@@ -1145,9 +1166,7 @@ async function pollForResult(taskId, apiKey) {
       }
 
       try {
-        const res  = await fetch(`${API_BASE}/tasks/${taskId}`, {
-          headers: { 'Authorization': `Bearer ${apiKey}` },
-        });
+        const res  = await apiFetch(`tasks/${taskId}`, apiKey, { method: 'GET' });
         const data = await res.json();
 
         if (data.code !== 0) {
@@ -1360,7 +1379,7 @@ function clearAlerts() {
 function formatError(err) {
   const msg = err.message || String(err);
   if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('CORS')) {
-    return `Network/CORS error: ${msg}\n\nThe Triverse API may block browser requests. Try running through a local proxy or use a CORS-bypass browser extension.`;
+    return `Network error: ${msg}\n\nContatta l'amministratore se il problema persiste.`;
   }
   return msg;
 }
