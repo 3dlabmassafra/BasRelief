@@ -909,21 +909,21 @@
 'use strict';
 
 /* ─── Constants ──────────────────────────────────────────────── */
-// Proxy works ONLY on Vercel (serverless function).
-// GitHub Pages = static only → direct API (may hit CORS unless Triverse allows it).
-const IS_VERCEL       = location.hostname.endsWith('.vercel.app') || location.hostname === 'basrelief.vercel.app';
+// /api/proxy è mappato alla serverless function su Netlify (netlify.toml) e Vercel.
+const IS_VERCEL       = location.hostname.endsWith('.vercel.app');
+const IS_NETLIFY      = location.hostname.endsWith('.netlify.app') || location.hostname.endsWith('.netlify.live');
 const IS_GITHUB_PAGES = location.hostname.endsWith('.github.io');
 const IS_LOCAL        = location.protocol === 'file:' || location.hostname === 'localhost';
-const USE_PROXY       = IS_VERCEL; // only Vercel has the serverless function
-const PROXY_BASE = '/api/proxy';          // Vercel edge function
+const USE_PROXY       = IS_VERCEL || IS_NETLIFY; // serverless function disponibile
+const PROXY_BASE = '/api/proxy';
 const API_BASE   = 'https://api.triverse.ai/api/v1';
 const POLL_INTERVAL   = 3000;
 const MAX_POLL        = 120;
 const LS_KEY          = 'triverse_api_key';
 
 /**
- * Routes the fetch through /api/proxy (Vercel) or directly to the API.
- * On GitHub Pages, tries direct API — may fail if Triverse blocks CORS.
+ * Su Netlify/Vercel: passa per /api/proxy (serverless, no CORS).
+ * Altrove: chiamata diretta all'API Triverse.
  */
 function apiFetch(path, apiKey, options = {}) {
   if (USE_PROXY) {
@@ -937,7 +937,7 @@ function apiFetch(path, apiKey, options = {}) {
   }
 }
 
-/* Show banner if on GitHub Pages */
+/* Banner su GitHub Pages */
 window.addEventListener('DOMContentLoaded', () => {
   if (IS_GITHUB_PAGES) {
     const banner = document.createElement('div');
@@ -947,13 +947,11 @@ window.addEventListener('DOMContentLoaded', () => {
       padding:10px 16px; font-weight:600; font-size:14px;
     `;
     banner.innerHTML = `
-      ⚠️ Stai usando <b>GitHub Pages</b> che non supporta il proxy API.
-      Per usare l'app correttamente esegui il deploy su
-      <a href="https://vercel.com/new/clone?repository-url=https://github.com/3dlabmassafra/BasRelief"
-         target="_blank" style="color:#1e40af;text-decoration:underline">
-        Vercel (click qui — gratis)
-      </a>
-      oppure accedi tramite la tua URL Vercel.
+      ⚠️ Stai usando <b>GitHub Pages</b> (solo statico). Usa la versione su
+      <a href="https://app.netlify.com/start/deploy?repository=https://github.com/3dlabmassafra/BasRelief"
+         target="_blank" style="color:#1e3a8a;text-decoration:underline;font-weight:700">
+        Netlify (click qui — gratis)
+      </a> per il proxy API senza CORS.
     `;
     document.body.prepend(banner);
   }
