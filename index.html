@@ -1096,6 +1096,12 @@ async function startGeneration() {
 
   try {
     const taskId = await submitJob(apiKey);
+    if (taskId === null) {
+      // Direct result, no polling needed
+      setLoading(false);
+      showProgress('Completato!', 100);
+      return;
+    }
     showProgress('Job submitted. Waiting for processing…', 25);
     await pollForResult(taskId, apiKey);
   } catch (err) {
@@ -1121,33 +1127,50 @@ async function submitJob(apiKey) {
   formData.append('format',      outputFormat.value);
 
   // Try primary endpoint (routed through /api/proxy on Vercel to avoid CORS)
-  let res, data;
+  const ENDPOINTS = ['relief/generate', 'image-to-3d', 'relief'];
+  let res, data, lastErr;
 
-  try {
-    res = await apiFetch('relief/generate', apiKey, {
-      method: 'POST',
-      body: formData,
-    });
-    data = await res.json();
-  } catch (e) {
-    // Try fallback endpoint
-    console.warn('Primary endpoint failed, trying fallback:', e);
-    res = await apiFetch('image-to-3d', apiKey, {
-      method: 'POST',
-      body: formData,
-    });
-    data = await res.json();
+  for (const endpoint of ENDPOINTS) {
+    try {
+      showProgress(`Trying endpoint: ${endpoint}…`, 12);
+      res = await apiFetch(endpoint, apiKey, { method: 'POST', body: formData });
+      data = await safeJson(res);
+      if (data && (res.ok || data.code === 0)) break; // success
+      lastErr = new Error(data?.message || data?.suggestion || `HTTP ${res.status} from ${endpoint}`);
+    } catch (e) {
+      lastErr = e;
+      console.warn(`Endpoint ${endpoint} failed:`, e);
+    }
+    data = null;
   }
 
-  if (!res.ok || data.code !== 0) {
+  if (!data) throw lastErr || new Error('All endpoints failed.');
+  if (!res.ok || (data.code !== undefined && data.code !== 0)) {
     throw new Error(data.message || data.suggestion || `HTTP ${res.status}`);
   }
 
-  // Extract task id
-  const d = data.data || {};
+  // Extract task id — handle both async (task_id) and sync (model_url) responses
+  const d = data.data || data || {};
   const id = d.task_id || d.taskId || d.id || d.job_id;
-  if (!id) throw new Error('API did not return a task_id. Check your API key and plan.');
+  // Some APIs return the result directly (no polling needed)
+  const directUrl = d.model_url || d.output_url || d.url || d.file_url;
+  if (directUrl && !id) {
+    await handleResult(directUrl, d, 'direct');
+    return null; // signal: no polling needed
+  }
+  if (!id) throw new Error(`API non ha restituito un task_id.\n\nRisposta: ${JSON.stringify(d).slice(0, 300)}`);
   return id;
+}
+
+/** Safely parse JSON; if body is HTML/text, return null and log it. */
+async function safeJson(res) {
+  const ct = res.headers.get('content-type') || '';
+  if (!ct.includes('json')) {
+    const text = await res.text();
+    console.error('Non-JSON response:', res.status, text.slice(0, 500));
+    return { code: res.status, message: `Server returned non-JSON (HTTP ${res.status}). Endpoint potrebbe non esistere.`, _raw: text.slice(0, 200) };
+  }
+  return res.json();
 }
 
 async function pollForResult(taskId, apiKey) {
@@ -1167,7 +1190,7 @@ async function pollForResult(taskId, apiKey) {
 
       try {
         const res  = await apiFetch(`tasks/${taskId}`, apiKey, { method: 'GET' });
-        const data = await res.json();
+        const data = await safeJson(res);
 
         if (data.code !== 0) {
           clearInterval(pollTimer);
