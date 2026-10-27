@@ -1,65 +1,30 @@
-# 3D Lab Massafra – Bas Relief Generator
+# 3D Bas Relief Generator 🏺
 
-A **single-page web application** that turns images or text prompts into downloadable 3D bas-relief models using the [Triverse AI](https://triverse.ai) API.
+Web app completa per la generazione in tempo reale di bassorilievi 3D a partire da qualsiasi immagine 2D (foto, loghi, motivi ornamentali, stencil).
+Ottimizzata per la **fresatura CNC su legno/metallo**, la **stampa 3D (FDM / Resina)** e l'**incisione laser**.
 
-## ✨ Features
+Ispirata al funzionamento di [Triverse 3D Relief Generator](https://triverse.ai/3d-relief-generator).
 
-| Feature | Details |
-|---|---|
-| 🖼️ Image Upload | Drag & drop or click — PNG, JPG, WEBP, BMP (up to 20 MB) |
-| ✏️ Text Prompt | Describe the scene in natural language |
-| ⚙️ Settings | Depth scale, smoothness, thickness, output format (GLB/STL/OBJ) |
-| 🎮 3D Viewer | Interactive GLB viewer via `<model-viewer>`, Three.js STL renderer |
-| ⬇️ Download | One-click download of the generated model |
-| 🔒 API Key | Stored in `localStorage` — never hardcoded |
+---
 
-## 🚀 Live Demo
+## ✨ Funzionalità
 
-**GitHub Pages URL:** https://3dlabmassafra.github.io/BasRelief/
-
-## 🛠️ Getting Started
-
-### Prerequisites
-- A [Triverse AI](https://triverse.ai) account and API key
-
-### Usage
-1. Open the app (or run locally: just open `index.html` in your browser).
-2. Paste your **Triverse AI API key** and click 💾 to save it.
-3. Choose the **Upload Image** tab and drop an image, _or_ switch to **Text Prompt** and describe your scene.
-4. (Optional) Expand **Advanced Parameters** to tune depth, smoothness, and thickness.
-5. Select your preferred **Output Format** (GLB recommended for 3D preview).
-6. Click **🚀 Generate Relief** and wait ~30–90 seconds.
-7. Rotate the 3D preview, then click **⬇️ Download Model**.
-
-## ⚠️ CORS Notice
-
-The Triverse API may restrict browser-to-API requests (CORS). If you see a network error:
-
-- **Option A:** Install a browser extension that disables CORS (e.g., *CORS Unblock* for Chrome) — for development only.
-- **Option B:** Run a simple local proxy (e.g., `cors-anywhere`) and point the API base URL to it.
-- **Option C:** Deploy a server-side proxy (e.g., Cloudflare Worker or Vercel Edge Function) that forwards requests with your key.
-
-## 📁 Project Structure
-
-```
-BasRelief/
-├── index.html          # Complete self-contained app
-├── README.md           # This file
-└── .github/
-    └── workflows/
-        └── deploy.yml  # GitHub Actions → GitHub Pages
-```
-
-## 🔧 API Integration
-
-| Step | Detail |
-|---|---|
-| **Endpoint** | `POST https://api.triverse.ai/api/v1/relief/generate` (fallback: `/image-to-3d`) |
-| **Auth** | `Authorization: Bearer <API_KEY>` |
-| **Body** | `multipart/form-data`: `image`, `prompt`, `depth_scale`, `smoothness`, `thickness`, `format` |
-| **Polling** | `GET /tasks/{task_id}` every 3 s until `status === "completed"` |
-| **Result** | `data.model_url` or `data.output_url` — shown in viewer + downloadable |
-
-## 📄 License
-
-MIT © 2024 3D Lab Massafra
+- **100% Client-Side nel Browser**: Nessuna API remota richiesta, nessun costo per credito, zero problemi di CORS o token esauriti. Funziona istantaneamente sia online che offline.
+- **Mesh 3D Solida e Watertight (Manifold al 100%)**: Crea un solido completamente chiuso con base posteriore piatta e bordi laterali saldati, subito pronto per lo slicer (Cura, Bambu Studio, PrusaSlicer, Fusion 360, ArtCAM, Aspire).
+- **Controllo Parametrico Real-time**:
+  - **Relief Depth (mm)**: Altezza del rilievo in millimetri.
+  - **Base Thickness (mm)**: Spessore della tavola di fondo.
+  - **Width (mm)**: Larghezza fisica dell'oggetto finale.
+  - **Smoothness**: Filtro di levigatura e rimozione del rumore dell'immagine.
+  - **Compressione / Contrasto**: Regolazione dinamica delle ombre e delle curve di altezza.
+  - **Appiattisci Fondo Scuro (Cutout)**: Rende il nero della silhouette a livello zero per medaglie e sagome pulite.
+  - **Inverti Profondità**: Passaggio istantaneo da bassorilievo a stampo/negativo.
+- **Shader e Materiali di Visualizzazione PBR**:
+  - Aged Gold (Oro antico)
+  - Bronzo
+  - Argento lucido
+  - Dark Iron (Ferro battuto)
+  - Argilla / Calco
+- **Esportazione Diretta**:
+  - **Download STL binario watertight**: File 3D compatto e pronto per la fresa CNC o stampante 3D.
+  - **Esporta Heightmap (PNG 16-bit)**: Mappa di profondità grayscale per laser e software CAM.
