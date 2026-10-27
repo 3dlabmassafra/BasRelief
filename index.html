@@ -1132,54 +1132,138 @@ async function startGeneration() {
 }
 
 async function submitJob(apiKey) {
-  const formData = new FormData();
+  /**
+   * Triverse API usa JSON body (non FormData) e vuole image_url (URL pubblico).
+   * Per upload file: prima carichiamo l'immagine come base64 data URL,
+   * poi la inviamo come image_url o image_base64 secondo la loro API.
+   *
+   * Endpoint confermati dalla documentazione:
+   *   POST /models/image-to-3d  → image + mode:"relief"
+   *   POST /models/text-to-3d   → prompt
+   */
 
+  let imageBase64 = null;
   if (activeTab === 'upload' && currentFile) {
-    formData.append('image', currentFile, currentFile.name);
-  }
-  if (activeTab === 'prompt' && promptInput.value.trim()) {
-    formData.append('prompt', promptInput.value.trim());
+    imageBase64 = await fileToBase64(currentFile);
   }
 
-  formData.append('depth_scale', depthScale.value);
-  formData.append('smoothness',  smoothness.value);
-  formData.append('thickness',   thicknessRange.value);
-  formData.append('format',      outputFormat.value);
+  const isImageMode  = activeTab === 'upload' && imageBase64;
+  const isPromptMode = activeTab === 'prompt' && promptInput.value.trim();
 
-  // Try primary endpoint (routed through /api/proxy on Vercel to avoid CORS)
-  const ENDPOINTS = ['relief/generate', 'image-to-3d', 'relief'];
+  // Costruiamo i payload per ogni endpoint da provare
+  const attempts = [];
+
+  if (isImageMode) {
+    // Endpoint 1: /models/image-to-3d (documentato)
+    attempts.push({
+      endpoint: 'models/image-to-3d',
+      body: JSON.stringify({
+        image_url:   imageBase64,
+        mode:        'relief',
+        depth:       parseFloat(depthScale.value),
+        target_format: outputFormat.value.toLowerCase(),
+      }),
+      ct: 'application/json',
+    });
+    // Endpoint 2: /image-to-3d (alias breve)
+    attempts.push({
+      endpoint: 'image-to-3d',
+      body: JSON.stringify({
+        image_url:   imageBase64,
+        mode:        'relief',
+        depth_scale: parseFloat(depthScale.value),
+        format:      outputFormat.value.toLowerCase(),
+      }),
+      ct: 'application/json',
+    });
+    // Endpoint 3: multipart FormData come fallback
+    const fd = new FormData();
+    fd.append('image', currentFile, currentFile.name);
+    fd.append('mode',        'relief');
+    fd.append('depth_scale', depthScale.value);
+    fd.append('format',      outputFormat.value);
+    attempts.push({ endpoint: 'models/image-to-3d', body: fd, ct: null });
+  }
+
+  if (isPromptMode) {
+    attempts.push({
+      endpoint: 'models/text-to-3d',
+      body: JSON.stringify({
+        prompt:       promptInput.value.trim(),
+        mode:        'relief',
+        depth:        parseFloat(depthScale.value),
+        target_format: outputFormat.value.toLowerCase(),
+      }),
+      ct: 'application/json',
+    });
+    attempts.push({
+      endpoint: 'text-to-3d',
+      body: JSON.stringify({
+        prompt:      promptInput.value.trim(),
+        depth_scale: parseFloat(depthScale.value),
+        format:      outputFormat.value.toLowerCase(),
+      }),
+      ct: 'application/json',
+    });
+  }
+
+  if (!attempts.length) {
+    throw new Error('Carica un\'immagine o inserisci un prompt prima di generare.');
+  }
+
   let res, data, lastErr;
 
-  for (const endpoint of ENDPOINTS) {
+  for (const { endpoint, body, ct } of attempts) {
     try {
-      showProgress(`Trying endpoint: ${endpoint}…`, 12);
-      res = await apiFetch(endpoint, apiKey, { method: 'POST', body: formData });
+      showProgress(`Contatto API: ${endpoint}…`, 12);
+      const extraHeaders = ct ? { 'Content-Type': ct } : {};
+      res = await apiFetch(endpoint, apiKey, {
+        method: 'POST',
+        headers: extraHeaders,
+        body,
+      });
       data = await safeJson(res);
-      if (data && (res.ok || data.code === 0)) break; // success
-      lastErr = new Error(data?.message || data?.suggestion || `HTTP ${res.status} from ${endpoint}`);
+      console.log(`[${endpoint}] status=${res.status}`, data);
+
+      // Successo se code===0 oppure res.ok e nessun code di errore
+      if (data && (data.code === 0 || (res.ok && data.code === undefined))) break;
+      lastErr = new Error(data?.message || data?.suggestion || `HTTP ${res.status} — ${endpoint}`);
     } catch (e) {
       lastErr = e;
-      console.warn(`Endpoint ${endpoint} failed:`, e);
+      console.warn(`[${endpoint}] failed:`, e);
     }
     data = null;
   }
 
-  if (!data) throw lastErr || new Error('All endpoints failed.');
-  if (!res.ok || (data.code !== undefined && data.code !== 0)) {
-    throw new Error(data.message || data.suggestion || `HTTP ${res.status}`);
+  if (!data) throw lastErr || new Error('Tutti gli endpoint hanno fallito. Verifica la tua API key.');
+  if (data.code !== undefined && data.code !== 0) {
+    throw new Error(data.message || data.suggestion || `Errore API (code ${data.code})`);
   }
 
-  // Extract task id — handle both async (task_id) and sync (model_url) responses
+  // Estrai task_id o risultato diretto
   const d = data.data || data || {};
   const id = d.task_id || d.taskId || d.id || d.job_id;
-  // Some APIs return the result directly (no polling needed)
-  const directUrl = d.model_url || d.output_url || d.url || d.file_url;
+  const directUrl = d.model_url || d.output_url || d.url || d.file_url || d.download_url;
   if (directUrl && !id) {
     await handleResult(directUrl, d, 'direct');
-    return null; // signal: no polling needed
+    return null;
   }
-  if (!id) throw new Error(`API non ha restituito un task_id.\n\nRisposta: ${JSON.stringify(d).slice(0, 300)}`);
+  if (!id) {
+    throw new Error(
+      `API non ha restituito un task_id.\n\nRisposta ricevuta:\n${JSON.stringify(d, null, 2).slice(0, 400)}`
+    );
+  }
   return id;
+}
+
+/** Converte File in data URL base64 */
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload  = () => resolve(reader.result); // es. "data:image/png;base64,..."
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 
 /** Safely parse JSON; if body is HTML/text, return null and log it. */
